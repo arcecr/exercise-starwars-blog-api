@@ -1,45 +1,67 @@
-"""
-This module takes care of starting the API Server, Loading the DB and Adding the endpoints
-"""
 import os
-from flask import Flask, request, jsonify, url_for
-from flask_migrate import Migrate
-from flask_swagger import swagger
+from flask import Flask, jsonify
 from flask_cors import CORS
+from flask_migrate import Migrate
+from flask_jwt_extended import JWTManager
+
+from models import configure as config_db, User
+from serializer import configure as config_ma
+
 from utils import APIException, generate_sitemap
 from admin import setup_admin
-from models import db, User
-#from models import Person
+
 
 app = Flask(__name__)
+
 app.url_map.strict_slashes = False
+
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DB_CONNECTION_STRING')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-MIGRATE = Migrate(app, db)
-db.init_app(app)
-CORS(app)
+app.config['JWT_SECRET_KEY'] = 'secret'
+
+CORS(app) 
+
+config_db(app) # Database
+config_ma(app) # Marshmallow 
+
+MIGRATE = Migrate(app, app.db)
+
+jwt = JWTManager(app)
+
+@jwt.user_identity_loader
+def user_identity_lookup(user): return user.id
+
+@jwt.user_lookup_loader
+def user_lookup_callback(_jwt_header, jwt_data):
+    identity = jwt_data["sub"]
+    return User.query.filter_by(id=identity).one_or_none()
+
+
 setup_admin(app)
 
-# Handle/serialize errors like a JSON object
+# Error Handling
 @app.errorhandler(APIException)
-def handle_invalid_usage(error):
-    return jsonify(error.to_dict()), error.status_code
+def handle_invalid_usage(error): return jsonify(error.to_dict()), error.status_code
 
-# generate sitemap with all your endpoints
+# Generate Sitemap
 @app.route('/')
-def sitemap():
-    return generate_sitemap(app)
+def sitemap(): return generate_sitemap(app)
 
-@app.route('/user', methods=['GET'])
-def handle_hello():
 
-    response_body = {
-        "msg": "Hello, this is your GET /user response "
-    }
+from users import users_bp
+app.register_blueprint(users_bp)
 
-    return jsonify(response_body), 200
 
-# this only runs if `$ python src/main.py` is executed
+from people import people_bp
+app.register_blueprint(people_bp)
+
+from planets import planets_bp
+app.register_blueprint(planets_bp)
+
+from vehicles import vehicles_bp
+app.register_blueprint(vehicles_bp)
+
+
 if __name__ == '__main__':
     PORT = int(os.environ.get('PORT', 3000))
     app.run(host='0.0.0.0', port=PORT, debug=False)
